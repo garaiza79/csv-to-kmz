@@ -705,7 +705,7 @@ else:
 # Footer
 st.markdown("""
 <div class="footer">
-    Flō Networks — Herramientas GIS<br>
+    Gibran Araiza — Herramientas GIS<br>
     Hecho con Streamlit
 </div>
 """, unsafe_allow_html=True)
