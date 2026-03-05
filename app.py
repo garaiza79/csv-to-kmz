@@ -279,9 +279,10 @@ def is_visible(value):
 # ═══════════════════════════════════════════════════════════
 
 def build_kml(df, lat_col, lon_col, name_col, folder_cols, desc_cols,
-              icon_col, icon_color_col, icon_size_col, visibility_col,
-              default_icon, default_color, default_size, default_visibility,
-              doc_name):
+              icon_col, icon_color_col, icon_size_col, label_scale_col,
+              visibility_col,
+              default_icon, default_color, default_size, default_label_scale,
+              default_visibility, doc_name):
     """Construye el contenido KML a partir del DataFrame."""
 
     ns = "http://www.opengis.net/kml/2.2"
@@ -293,8 +294,8 @@ def build_kml(df, lat_col, lon_col, name_col, folder_cols, desc_cols,
 
     styles_cache = {}
 
-    def get_or_create_style(icon_num, color, size):
-        key = f"{icon_num}_{color}_{size}"
+    def get_or_create_style(icon_num, color, size, label_scale):
+        key = f"{icon_num}_{color}_{size}_{label_scale}"
         if key not in styles_cache:
             style_id = f"style_{len(styles_cache)}"
             style = ET.SubElement(document, f'{{{ns}}}Style')
@@ -307,6 +308,10 @@ def build_kml(df, lat_col, lon_col, name_col, folder_cols, desc_cols,
                 ET.SubElement(icon_style, f'{{{ns}}}color').text = kml_color
             icon_el = ET.SubElement(icon_style, f'{{{ns}}}Icon')
             ET.SubElement(icon_el, f'{{{ns}}}href').text = get_icon_url(icon_num, color)
+            # LabelStyle
+            if label_scale is not None:
+                label_style = ET.SubElement(style, f'{{{ns}}}LabelStyle')
+                ET.SubElement(label_style, f'{{{ns}}}scale').text = str(label_scale)
             styles_cache[key] = style_id
         return styles_cache[key]
 
@@ -388,6 +393,7 @@ def build_kml(df, lat_col, lon_col, name_col, folder_cols, desc_cols,
             icon_num = default_icon
             color = default_color
             size = default_size
+            label_scale = default_label_scale
 
             if icon_col and icon_col in row.index:
                 val = row[icon_col]
@@ -410,7 +416,15 @@ def build_kml(df, lat_col, lon_col, name_col, folder_cols, desc_cols,
                     except (ValueError, TypeError):
                         pass
 
-            style_id = get_or_create_style(icon_num, color, size)
+            if label_scale_col and label_scale_col in row.index:
+                val = row[label_scale_col]
+                if not pd.isna(val):
+                    try:
+                        label_scale = float(val)
+                    except (ValueError, TypeError):
+                        pass
+
+            style_id = get_or_create_style(icon_num, color, size, label_scale)
             ET.SubElement(placemark, f'{{{ns}}}styleUrl').text = f"#{style_id}"
 
             point = ET.SubElement(placemark, f'{{{ns}}}Point')
@@ -561,7 +575,7 @@ if uploaded_file is not None:
     tab_default, tab_column = st.tabs(["🎯 Icono por defecto", "📊 Icono desde columna"])
 
     with tab_default:
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             default_icon = st.number_input("Número de icono", min_value=1, max_value=200, value=161,
                                            help="Abre la galería arriba para ver los iconos")
@@ -572,8 +586,12 @@ if uploaded_file is not None:
             if default_color == "(ninguno)":
                 default_color = None
         with col3:
-            default_size = st.number_input("Tamaño del icono", min_value=0.1, max_value=5.0,
+            default_size = st.number_input("Tamaño del icono (IconSize)", min_value=0.1, max_value=5.0,
                                            value=1.0, step=0.1, help="1.0 = tamaño normal")
+        with col4:
+            default_label_scale = st.number_input("Tamaño de etiqueta (LabelScale)", min_value=0.0, max_value=5.0,
+                                                   value=1.0, step=0.1,
+                                                   help="Tamaño del texto junto al icono. 0 = ocultar etiqueta")
 
         # Preview del icono seleccionado
         if default_icon in ICON_CATALOG:
@@ -591,12 +609,13 @@ if uploaded_file is not None:
     with tab_column:
         st.markdown("""
         <div class="info-box">
-            Si tu archivo tiene columnas <strong>Icon</strong>, <strong>IconColor</strong> o 
-            <strong>IconSize</strong>, selecciónalas aquí para que cada punto tenga su propio estilo.
+            Si tu archivo tiene columnas <strong>Icon</strong>, <strong>IconColor</strong>, 
+            <strong>IconSize</strong> o <strong>LabelScale</strong>, selecciónalas aquí 
+            para que cada punto tenga su propio estilo.
         </div>
         """, unsafe_allow_html=True)
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             icon_col = st.selectbox("Columna Icon (número)", ["(no usar)"] + all_cols)
             icon_col = None if icon_col == "(no usar)" else icon_col
@@ -606,6 +625,10 @@ if uploaded_file is not None:
         with col3:
             icon_size_col = st.selectbox("Columna IconSize", ["(no usar)"] + all_cols)
             icon_size_col = None if icon_size_col == "(no usar)" else icon_size_col
+        with col4:
+            label_scale_col = st.selectbox("Columna LabelScale", ["(no usar)"] + all_cols,
+                                           help="Tamaño del texto junto al icono (0.8 a 2.0)")
+            label_scale_col = None if label_scale_col == "(no usar)" else label_scale_col
 
     # ─── PASO 6: Visibilidad ───
     st.markdown('<div class="step-header">👁️ Paso 6: Visibilidad (IsVisible)</div>', unsafe_allow_html=True)
@@ -645,9 +668,11 @@ if uploaded_file is not None:
                     name_col=name_col, folder_cols=folder_cols,
                     desc_cols=desc_cols, icon_col=icon_col,
                     icon_color_col=icon_color_col, icon_size_col=icon_size_col,
+                    label_scale_col=label_scale_col,
                     visibility_col=visibility_col,
                     default_icon=default_icon, default_color=default_color,
-                    default_size=default_size, default_visibility=default_visibility,
+                    default_size=default_size, default_label_scale=default_label_scale,
+                    default_visibility=default_visibility,
                     doc_name=doc_name
                 )
 
@@ -697,6 +722,7 @@ else:
         • <strong>Icon</strong>: Número del icono de Google Earth (1-200)<br>
         • <strong>IconColor</strong>: Color del icono (red, blue, green, etc. o #RRGGBB)<br>
         • <strong>IconSize</strong>: Escala del icono (0.5 a 2.0)<br>
+        • <strong>LabelScale</strong>: Tamaño del texto junto al icono (0.8 a 2.0, 0 = ocultar)<br>
         • <strong>IsVisible</strong>: Mostrar/ocultar elementos (True, Yes, x, False, No)<br>
         • <strong>Folder</strong>: Organización en carpetas
     </div>
